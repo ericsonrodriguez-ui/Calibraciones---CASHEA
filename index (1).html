@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calibración de Calidad — Cashea</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- Firebase (guardado compartido en tiempo real) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<!-- Para exportar a PNG -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+<style>
+  :root{
+    --brand-500:#FFEE33; --brand-600:#FFDD00; --brand-700:#E5BF00; --brand-800:#C29D0A; --brand-100:#FFFEE2;
+    --neutral-1000:#1A1917; --neutral-900:#353430; --neutral-800:#504F47; --neutral-700:#6B6961;
+    --neutral-600:#868479; --neutral-500:#9E9C94; --neutral-300:#CFCEC9; --neutral-200:#E6E6E4;
+    --neutral-100:#F4F4F3; --neutral-0:#FFFFFF; --neutral-50:#F4F4F3;
+    --success-600:#2DD280; --success-500:#55DD99; --success-100:#EAFBF2; --success-300:#A4F4CC;
+    --warning-600:#F2870D; --warning-100:#FFF5E5; --warning-300:#FFD699; --warning-800:#985101;
+    --error-600:#D92629; --error-700:#AD1F21; --error-500:#EB474A; --error-100:#FDECEA; --error-300:#F5A9A3;
+    --info-600:#1492EB; --info-500:#34ADFE;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--neutral-100); color:var(--neutral-900); font-family:'DM Sans',sans-serif; }
+  input, select, button { font-family:'DM Sans',sans-serif; }
+  h1,h2,h3 { font-family:'Poppins',sans-serif; margin:0; }
+  a { color:var(--brand-700); }
+  button { cursor:pointer; }
+  .card { background:var(--neutral-0); border:1px solid var(--neutral-200); border-radius:16px; padding:20px; }
+  .lbl { font-size:11px; color:var(--neutral-500); text-transform:uppercase; font-weight:600; display:block; margin-bottom:6px; letter-spacing:.03em; }
+  .inp { width:100%; background:var(--neutral-0); border:1px solid var(--neutral-300); color:var(--neutral-900); border-radius:10px; padding:9px 12px; font-size:13px; outline:none; }
+  .btn { border-radius:10px; padding:10px 16px; font-size:13px; font-weight:700; border:none; cursor:pointer; }
+  .btn-primary { background:var(--brand-500); color:var(--neutral-1000); }
+  .btn-ghost { background:var(--neutral-0); border:1px solid var(--neutral-300); color:var(--neutral-700); }
+  .pill { border-radius:8px; padding:6px 11px; font-size:11.5px; font-weight:600; cursor:pointer; border:1px solid var(--neutral-300); background:var(--neutral-0); color:var(--neutral-500); }
+  .pill.active-ok { background:var(--success-600); color:#fff; border-color:var(--success-600); }
+  .pill.active-bad { background:var(--error-600); color:#fff; border-color:var(--error-600); }
+  .pill.active-na { background:var(--neutral-500); color:#fff; border-color:var(--neutral-500); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:var(--neutral-500); font-size:11px; text-transform:uppercase; letter-spacing:.04em; padding:12px; }
+  td { padding:12px; border-top:1px solid var(--neutral-200); color:var(--neutral-700); }
+  .qc-no-print { }
+  @media print { .qc-no-print { display:none !important; } }
+</style>
+</head>
+<body>
+
+<div style="min-height:100vh; display:flex;">
+  <!-- SIDEBAR -->
+  <div class="qc-no-print" style="width:230px; flex-shrink:0; background:var(--neutral-0); border-right:1px solid var(--neutral-200); padding:24px 16px; display:flex; flex-direction:column; gap:4px; position:sticky; top:0; height:100vh;">
+    <div style="display:flex; align-items:center; gap:10px; padding:0 8px 20px;">
+      <div style="width:10px; height:10px; border-radius:999px; background:var(--brand-500);"></div>
+      <span style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--neutral-500);">Calidad</span>
+    </div>
+    <h1 style="font-size:17px; font-weight:700; margin:0 0 20px; padding:0 8px;">Calibración de Calidad</h1>
+    <button data-action="goEvaluacion" id="navEval" style="display:flex; align-items:center; gap:10px; width:100%; text-align:left; border:none; background:transparent; padding:10px 8px; border-radius:10px; font-size:13.5px; font-weight:600;">Evaluación</button>
+    <button data-action="goResultados" id="navRes" style="display:flex; align-items:center; gap:10px; width:100%; text-align:left; border:none; background:transparent; padding:10px 8px; border-radius:10px; font-size:13.5px; font-weight:600;">Resultados</button>
+    <div id="connStatus" style="margin-top:auto; font-size:11px; color:var(--neutral-500); padding:8px;">Conectando…</div>
+  </div>
+
+  <!-- MAIN -->
+  <div style="flex:1; min-width:0; padding:32px 40px 80px;">
+    <div id="app"></div>
+  </div>
+</div>
+
+<script>
+/* =========================================================================
+   1) CONFIGURACIÓN DE FIREBASE — REEMPLAZA ESTOS VALORES
+   Ve a https://console.firebase.google.com -> crea un proyecto ->
+   Configuración del proyecto -> "Tus apps" -> Web -> copia el config aquí.
+   Luego en Firestore Database, crea la base en modo "producción" y ajusta
+   las reglas (ver instrucciones que te doy en el chat).
+   ========================================================================= */
+const firebaseConfig = {
+  apiKey: "TU_API_KEY",
+  authDomain: "TU_PROYECTO.firebaseapp.com",
+  projectId: "TU_PROYECTO",
+  storageBucket: "TU_PROYECTO.appspot.com",
+  messagingSenderId: "TU_SENDER_ID",
+  appId: "TU_APP_ID"
+};
+
+const RESULTS_PASSWORD = '987654321';
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const subsCol = db.collection('submissions');
+
+/* =========================================================================
+   2) RÚBRICAS (idénticas a tu manual)
+   ========================================================================= */
+const RUBRICS = {
+  ATI: {
+    groups: [
+      { title: 'Comunicación (40%)', section: 'comm', items: [
+        ['1.1','Gestión del tiempo de primera respuesta',4],
+        ['1.2','Gestión del tiempo entre respuestas',4],
+        ['1.3','Eficiencia en la conversación',5],
+        ['1.4','Responde todos los puntos del mensaje',5],
+        ['1.5','Instrucciones numeradas y específicas',7],
+        ['1.6','Explica el contexto antes de la instrucción',5],
+        ['1.7','Empatía ante bloqueo',4],
+        ['1.8','Tono resolutivo en casos complejos',3],
+        ['1.9','Calidad de escritura',3]
+      ]},
+      { title: 'Proceso — Diagnóstico y contexto (10%)', section: 'proc', items: [
+        ['2.1','Lectura activa del historial',6],
+        ['2.2','Continuidad del caso',4]
+      ]},
+      { title: 'Proceso — Control de identidad (10%)', section: 'proc', items: [
+        ['2.3','Protocolo de validación de identidad',10]
+      ]},
+      { title: 'Proceso — Control de acciones en Retool (15%)', section: 'proc', items: [
+        ['2.4','Autorización para cambios de alto impacto',5],
+        ['2.5','Mínima intervención',3],
+        ['2.6','Registro antes y después',5],
+        ['2.7','Confirmación post-ejecución',2]
+      ]},
+      { title: 'Proceso — Documentación y cierre (10%)', section: 'proc', items: [
+        ['2.8','Documentación completa',4],
+        ['2.9','Tipificación correcta',4],
+        ['2.10','Snooze correcto',2]
+      ]},
+      { title: 'Proceso — Escalado (15%)', section: 'proc', items: [
+        ['2.11','Criterio correcto de escalado',5],
+        ['2.12','Canal correcto de escalado',5],
+        ['2.13','Documenta el escalado en Slack',5]
+      ]}
+    ],
+    criticals: [
+      ['D1','Omisión del motivo principal del contacto'],
+      ['D2','Protocolo de seguridad violado'],
+      ['D3','Información incorrecta al cliente'],
+      ['D4','Escalado ignorado o canal informal'],
+      ['D5','Fricción activa con el cliente'],
+      ['D6','Ejecución no autorizada en Retool'],
+      ['D7','Campo o puntos incorrecto modificado'],
+      ['D8','Abandono de la conversación en curso']
+    ]
+  },
+  PAGOS: {
+    groups: [
+      { title: 'Comunicación (40%)', section: 'comm', items: [
+        ['C1','Gestión del tiempo de respuesta',6],
+        ['C2','Claridad de la respuesta',6],
+        ['C3','Responde todos los puntos',6],
+        ['C4','Instrucciones precisas',6],
+        ['C5','Empatía financiera',6],
+        ['C6','Tono sin fricción interna',5],
+        ['C7','Precisión en la escritura de montos',5]
+      ]},
+      { title: 'Proceso — Diagnóstico (30%)', section: 'proc', items: [
+        ['P1','Lectura activa e historial',6],
+        ['P2','Identificación del motivo',6],
+        ['P3','Diagnóstico y módulo correcto',6],
+        ['P4','Búsqueda en pasarela',6],
+        ['P5','Estado del pago antes de accionar',6]
+      ]},
+      { title: 'Proceso — Ejecución en Retool (10%)', section: 'proc', items: [
+        ['P6','Ejecución correcta en Retool',5],
+        ['P7','Documentación con evidencia visual',5]
+      ]},
+      { title: 'Proceso — Resolución técnica (10%)', section: 'proc', items: [
+        ['P8','Verificación del resultado en Retool',5],
+        ['P9','Tipificación del pago aplicado',3],
+        ['P10','Snooze correcto',2]
+      ]},
+      { title: 'Proceso — Escalado (10%)', section: 'proc', items: [
+        ['P11','Proceso de escalado a L2',5],
+        ['P12','Documentación antes del escalado',5]
+      ]}
+    ],
+    criticals: [
+      ['EC-C','Frustra activamente al cliente'],
+      ['EC-P1','Omisión del motivo principal'],
+      ['EC-P2','Acción incorrecta en Retool con impacto'],
+      ['EC-P3','Información incorrecta sobre pagos o políticas'],
+      ['EC-P4','Escalado incorrecto o canal informal'],
+      ['IND-1','Manipulación de datos o registros falsos'],
+      ['IND-2','Mal uso de Retool en usuario no relacionado'],
+      ['IND-3','Divulgación de información confidencial'],
+      ['IND-4','Abandono de conversación activa con pago en curso']
+    ]
+  }
+};
+
+/* =========================================================================
+   3) ESTADO
+   ========================================================================= */
+const state = {
+  activeSection: 'evaluacion',
+  resultsUnlocked: false, pwInput: '', pwError: false,
+  submissions: [],
+  expertId: null, matrixVertical: null, matrixFullscreen: false, cargoFilter: null, expandedId: null,
+  evalForm: { nombre:'', cargo:'', oficina:'', fecha:'', chatId:'', chatLink:'', vertical:'' },
+  evalStatuses: {}, evalCriticos: {}, evalError: false, lastReport: null,
+  summaryUnlocked: false, summaryPwInput: '', summaryPwError: false,
+  filterFecha: '', filterTicket: ''
+};
+
+function statusLabel(st){ return st==='cumple'?'Cumple':st==='no_cumple'?'No cumple':st==='na'?'N/A':'Sin marcar'; }
+function finalColor(v){ return v>=90?'var(--success-600)':v>=70?'var(--warning-600)':'var(--error-600)'; }
+function desvColor(v){ return v<=5?'var(--success-600)':v<=12?'var(--warning-600)':'var(--error-600)'; }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+/* =========================================================================
+   4) FIRESTORE — escucha en tiempo real (así todos ven los mismos datos)
+   ========================================================================= */
+subsCol.orderBy('createdAt','asc').onSnapshot(
+  snap => {
+    state.submissions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    document.getElementById('connStatus').textContent = 'Conectado · ' + state.submissions.length + ' evaluaciones';
+    render();
+  },
+  err => {
+    document.getElementById('connStatus').textContent = 'Error de conexión a Firebase';
+    console.error(err);
+  }
+);
+
+async function submitEvaluation(){
+  const ef = state.evalForm;
+  const rubric = RUBRICS[ef.vertical];
+  if (!rubric) return;
+  const anyCritical = Object.values(state.evalCriticos).some(v=>v);
+  let commSum=0, procSum=0;
+  rubric.groups.forEach(g=>g.items.forEach(([code,,weight])=>{
+    const status = state.evalStatuses[code];
+    if (status==='cumple'||status==='na'){ if(g.section==='comm') commSum+=weight; else procSum+=weight; }
+  }));
+  const final = anyCritical?0:commSum+procSum;
+  const year = ef.fecha ? ef.fecha.slice(0,4) : '2026';
+  const ticketId = `#CAL-${ef.vertical}-${ef.chatId||'SINID'}-${year}`;
+  const submission = {
+    ticketId, nombre: ef.nombre||'Sin nombre', cargo: ef.cargo||'—', oficina: ef.oficina||'—', vertical: ef.vertical,
+    fecha: ef.fecha||'—', comm: anyCritical?0:commSum, proc: anyCritical?0:procSum, final, critical: anyCritical,
+    itemScores: {...state.evalStatuses}, criticosMarked: {...state.evalCriticos},
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  const docRef = await subsCol.add(submission);
+  state.lastReport = { ...submission, id: docRef.id };
+  state.evalForm = { nombre:'', cargo:'', oficina:'', fecha:'', chatId:'', chatLink:'', vertical:'' };
+  state.evalStatuses = {}; state.evalCriticos = {};
+  render();
+}
+
+/* =========================================================================
+   5) RENDER — EVALUACIÓN
+   ========================================================================= */
+function renderEvaluacion(){
+  const ef = state.evalForm;
+  const rubric = RUBRICS[ef.vertical];
+  const showPending = ef.vertical==='ATA' || ef.vertical==='L2';
+
+  let rubricHtml = '';
+  if (rubric){
+    rubricHtml += rubric.groups.map(g => `
+      <div style="margin-top:18px;">
+        <div style="font-size:13px; font-weight:700; color:var(--neutral-800); margin-bottom:4px;">${esc(g.title)}</div>
+        ${g.items.map(([code,label,weight])=>{
+          const st = state.evalStatuses[code];
+          return `<div style="display:flex; justify-content:space-between; align-items:center; gap:14px; padding:10px 0; border-bottom:1px solid var(--neutral-200);">
+            <div style="flex:1; font-size:12.5px; color:var(--neutral-700);"><b>${code}</b> ${esc(label)} <span style="color:var(--neutral-500);">(${weight}%)</span></div>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+              <button class="pill ${st==='cumple'?'active-ok':''}" data-action="setStatus" data-arg="${code}|cumple">Cumple</button>
+              <button class="pill ${st==='no_cumple'?'active-bad':''}" data-action="setStatus" data-arg="${code}|no_cumple">No cumple</button>
+              <button class="pill ${st==='na'?'active-na':''}" data-action="setStatus" data-arg="${code}|na">N/A</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`).join('');
+
+    rubricHtml += `<div style="margin-top:22px; background:var(--error-100); border:1px solid var(--error-300); border-radius:12px; padding:16px 18px;">
+      <div style="font-size:12.5px; font-weight:700; color:var(--error-700); text-transform:uppercase; letter-spacing:.04em; margin-bottom:10px;">Errores críticos — cualquiera lleva la nota a 0%</div>
+      ${rubric.criticals.map(([id,label])=>`
+        <label style="display:flex; gap:8px; align-items:flex-start; padding:6px 0; font-size:12.5px; color:var(--error-800); cursor:pointer;">
+          <input type="checkbox" data-action="toggleCriticalCb" data-arg="${id}" ${state.evalCriticos[id]?'checked':''} style="margin-top:2px;">
+          <span><b>${id}</b> ${esc(label)}</span>
+        </label>`).join('')}
+    </div>
+    <button class="btn btn-primary" data-action="submitEval" style="margin-top:18px;">Generar reporte y enviar a Resultados</button>
+    <div style="display:${state.evalError?'block':'none'}; color:var(--error-600); font-size:12.5px; font-weight:600; margin-top:10px;">Completa nombre, cargo, fecha e ID del chat, y marca Cumple / No cumple / N/A en todos los ítems antes de generar el reporte.</div>`;
+  }
+
+  const lr = state.lastReport;
+  const reportHtml = lr ? `
+    <div style="margin-top:22px; background:var(--neutral-50); border:1px solid var(--neutral-200); border-radius:14px; padding:22px 24px;">
+      <div style="display:${lr.critical?'block':'none'}; background:var(--error-100); border:1px solid var(--error-300); color:var(--error-700); border-radius:10px; padding:12px 14px; font-size:13px; font-weight:600; margin-bottom:12px;">Error crítico detectado — la nota final se anula a 0%.</div>
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; margin-bottom:16px; flex-wrap:wrap;">
+        <div><div class="lbl">Ticket de calibración</div><div style="font-family:'Poppins',sans-serif; font-size:20px; font-weight:700; color:var(--brand-700);">${esc(lr.ticketId)}</div></div>
+        <div style="text-align:right;"><div class="lbl">Nota final</div><div style="font-family:'Poppins',sans-serif; font-size:32px; font-weight:700; color:${lr.critical?'var(--error-600)':finalColor(lr.final)};">${lr.final}%</div></div>
+      </div>
+      <div style="font-size:12.5px; color:var(--neutral-500);">Este resultado ya está disponible en la sección Resultados.</div>
+    </div>` : '';
+
+  document.getElementById('evalContent').innerHTML = `
+    <h2 style="font-size:26px; margin-bottom:6px;">Evaluación</h2>
+    <p style="margin:0 0 24px; font-size:14px; color:var(--neutral-600);">Aplica la planilla de monitoreo y genera el ticket de calibración. Cada envío se guarda en Firebase y alimenta Resultados para todos los usuarios en tiempo real.</p>
+    <div class="card" style="margin-bottom:20px;">
+      <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:16px;">
+        <div><span class="lbl">Nombre y apellido *</span><input class="inp" data-bind="evalForm.nombre" value="${esc(ef.nombre)}" placeholder="NOMBRE DEL PARTICIPANTE" style="text-transform:uppercase;"></div>
+        <div><span class="lbl">Cargo *</span><select class="inp" data-bind="evalForm.cargo">
+          <option value="">Selecciona un cargo</option>
+          ${['COORDINADOR','SUPERVISOR','ANALISTA','TL','GERENTE'].map(c=>`<option value="${c}" ${ef.cargo===c?'selected':''}>${c}</option>`).join('')}
+        </select></div>
+        <div><span class="lbl">Oficina *</span><select class="inp" data-bind="evalForm.oficina">
+          <option value="">Selecciona una oficina</option>
+          ${['PRC','Interno'].map(c=>`<option value="${c}" ${ef.oficina===c?'selected':''}>${c}</option>`).join('')}
+        </select></div>
+        <div><span class="lbl">Fecha de evaluación *</span><input type="date" class="inp" data-bind="evalForm.fecha" value="${esc(ef.fecha)}"></div>
+        <div><span class="lbl">ID del chat *</span><input class="inp" data-bind="evalForm.chatId" value="${esc(ef.chatId)}" placeholder="98432"></div>
+        <div><span class="lbl">Link del chat</span><input class="inp" data-bind="evalForm.chatLink" value="${esc(ef.chatLink)}" placeholder="https://..."></div>
+        <div><span class="lbl">Vertical *</span><select class="inp" data-bind="evalForm.vertical">
+          <option value="">Selecciona una vertical</option>
+          ${['ATI','PAGOS','ATA','L2'].map(c=>`<option value="${c}" ${ef.vertical===c?'selected':''}>${c}</option>`).join('')}
+        </select></div>
+      </div>
+      <div style="display:${showPending?'block':'none'}; background:var(--warning-100); border:1px solid var(--warning-300); color:var(--warning-800); border-radius:10px; padding:14px 16px; font-size:13px;">Esta vertical aún no tiene la rúbrica definida. Selecciona ATI o PAGOS para proceder, o pídeme que agregue la rúbrica de ATA/L2.</div>
+      ${rubricHtml}
+      ${reportHtml}
+    </div>`;
+}
+
+/* =========================================================================
+   6) RENDER — RESULTADOS
+   ========================================================================= */
+function renderResultados(){
+  const wrap = document.getElementById('resContent');
+  if (!state.resultsUnlocked){
+    wrap.innerHTML = `
+      <div style="max-width:340px; margin:80px auto; text-align:center;" class="card">
+        <h3 style="font-size:17px; margin-bottom:6px;">Acceso restringido</h3>
+        <p style="font-size:13px; color:var(--neutral-600); margin:0 0 18px;">Ingresa la clave para ver los resultados del equipo.</p>
+        <input type="password" class="inp" id="pwInput" placeholder="Clave de acceso" style="text-align:center; margin-bottom:10px;" value="${esc(state.pwInput)}">
+        <div style="display:${state.pwError?'block':'none'}; color:var(--error-600); font-size:12px; margin-bottom:10px;">Clave incorrecta. Intenta de nuevo.</div>
+        <button class="btn btn-primary" style="width:100%;" data-action="checkPassword">Ingresar</button>
+      </div>`;
+    document.getElementById('pwInput').addEventListener('input', e=>{ state.pwInput = e.target.value; state.pwError=false; });
+    document.getElementById('pwInput').addEventListener('keydown', e=>{ if(e.key==='Enter') doCheckPassword(); });
+    return;
+  }
+
+  const subs = state.submissions;
+  const expert = state.expertId ? subs.find(x=>x.id===state.expertId) : null;
+  const subAvgFinal = subs.length ? Math.round(subs.reduce((a,x)=>a+x.final,0)/subs.length) : 0;
+  const subCriticalCount = subs.filter(x=>x.critical).length;
+  const desvValues = expert ? subs.filter(x=>x.id!==expert.id).map(x=>Math.abs(x.final-expert.final)) : [];
+  const avgDesv = expert && desvValues.length ? Math.round(desvValues.reduce((a,b)=>a+b,0)/desvValues.length) : null;
+
+  // KPIs
+  let html = `
+    <div style="margin-bottom:24px;"><h2 style="font-size:26px; margin-bottom:6px;">Resultados</h2>
+    <p style="margin:0; font-size:14px; color:var(--neutral-600);">Datos en tiempo real desde Firebase · ${subs.length} evaluaciones registradas</p></div>
+    <div class="qc-no-print" style="display:flex; gap:10px; margin:-8px 0 20px; flex-wrap:wrap;">
+      <button class="btn btn-ghost" data-action="exportPDF">Descargar PDF</button>
+      <button class="btn btn-ghost" data-action="exportPNG">Descargar PNG</button>
+      <button class="btn btn-ghost" data-action="exportCSV">Exportar a Sheets (CSV)</button>
+    </div>`;
+
+  if (subs.length===0){
+    html += `<div class="card" style="border:1px dashed var(--neutral-300); text-align:center; padding:48px;">
+      <div style="font-size:14px; color:var(--neutral-600); margin-bottom:6px;">Todavía no hay evaluaciones registradas.</div>
+      <div style="font-size:13px; color:var(--neutral-500);">Ve a la sección <b>Evaluación</b>, completa la planilla y genera un reporte.</div></div>`;
+    wrap.innerHTML = html;
+    return;
+  }
+
+  html += `<div id="qc-capture">
+    <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px;">
+      <div class="card"><div class="lbl">Evaluaciones</div><div style="font-family:'Poppins',sans-serif; font-size:32px; font-weight:700;">${subs.length}</div></div>
+      <div class="card"><div class="lbl">Nota final promedio</div><div style="font-family:'Poppins',sans-serif; font-size:32px; font-weight:700; color:var(--success-600);">${subAvgFinal}%</div><div style="font-size:12px; color:var(--neutral-500);">meta: 95%</div></div>
+      <div class="card" style="border-color:var(--error-300);"><div class="lbl" style="color:var(--error-600);">Errores críticos</div><div style="font-family:'Poppins',sans-serif; font-size:32px; font-weight:700; color:var(--error-600);">${subCriticalCount}</div></div>
+      <div class="card"><div class="lbl">Desviación vs. experto</div><div style="font-family:'Poppins',sans-serif; font-size:32px; font-weight:700; color:var(--info-600);">${avgDesv===null?'—':avgDesv+'%'}</div><div style="font-size:12px; color:var(--neutral-500);">${expert?('vs. '+esc(expert.nombre)+' (experto)'):'marca un ★ en la tabla para comparar'}</div></div>
+    </div>`;
+
+  // Bar by cargo
+  const cargos = [...new Set(subs.map(x=>x.cargo))];
+  const cargoStats = cargos.map(c=>{
+    const grp = subs.filter(x=>x.cargo===c);
+    const avg = Math.round(grp.reduce((a,x)=>a+x.final,0)/grp.length);
+    return { cargo:c, avg, count:grp.length, crit:grp.filter(x=>x.critical).length };
+  }).sort((a,b)=>a.avg-b.avg);
+
+  html += `<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px;">
+    <div class="card">
+      <div style="font-size:13px; font-weight:700; margin-bottom:8px;">Nota final promedio por cargo</div>
+      <div style="font-size:12px; color:var(--neutral-500); margin-bottom:14px;">Clic para filtrar la tabla de abajo</div>
+      ${cargoStats.map(c=>`
+        <div data-action="setCargoFilter" data-arg="${esc(c.cargo)}" style="cursor:pointer; margin-bottom:14px; ${state.cargoFilter===c.cargo?'background:var(--brand-100); border-radius:10px; padding:8px; margin:-8px -8px 6px;':''}">
+          <div style="display:flex; justify-content:space-between; font-size:12.5px; color:var(--neutral-700); margin-bottom:5px;">
+            <span>${esc(c.cargo)} <span style="color:var(--neutral-400);">· ${c.count} eval.</span> ${(c.avg<80||c.crit>0)?'<span style="background:var(--error-100); color:var(--error-700); font-size:9.5px; font-weight:700; padding:1px 6px; border-radius:999px; text-transform:uppercase;">Reforzar</span>':''}</span>
+            <span style="font-weight:700; color:${finalColor(c.avg)};">${c.avg}%</span>
+          </div>
+          <div style="background:var(--neutral-100); border-radius:999px; height:10px; overflow:hidden;"><div style="height:100%; border-radius:999px; width:${Math.max(c.avg,2)}%; background:${finalColor(c.avg)};"></div></div>
+        </div>`).join('')}
+    </div>
+    <div class="card">
+      <div style="font-size:13px; font-weight:700; margin-bottom:8px;">Nota final vs. desviación</div>
+      <div style="font-size:12px; color:var(--neutral-500); margin-bottom:8px;">Cada punto es una evaluación</div>
+      ${renderScatter(subs, expert)}
+      <div style="display:flex; gap:16px; margin-top:6px; flex-wrap:wrap; font-size:11px; color:var(--neutral-600);">
+        <span><span style="width:9px;height:9px;border-radius:999px;background:var(--info-500);display:inline-block;margin-right:5px;"></span>Evaluación</span>
+        <span><span style="width:9px;height:9px;border-radius:999px;background:var(--brand-600);display:inline-block;margin-right:5px;"></span>Experto</span>
+        <span><span style="width:9px;height:9px;border-radius:999px;background:var(--error-500);display:inline-block;margin-right:5px;"></span>Error crítico</span>
+      </div>
+    </div>
+  </div>`;
+
+  // Attribute matrix
+  const verticalsPresent = [...new Set(subs.map(x=>x.vertical))];
+  const activeVertical = state.matrixVertical && verticalsPresent.includes(state.matrixVertical) ? state.matrixVertical
+    : (expert && verticalsPresent.includes(expert.vertical) ? expert.vertical : verticalsPresent[0]);
+  html += renderMatrix(subs, expert, activeVertical, verticalsPresent);
+
+  // Table
+  html += renderTable(subs, expert);
+
+  // Summary
+  html += renderSummary(subs, expert);
+
+  html += `</div>`; // qc-capture
+  wrap.innerHTML = html;
+}
+
+function renderScatter(subs, expert){
+  const calMax=100, desvMax=40;
+  const gridLines=[0,10,20,30,40].map(v=>({y:220-(v/desvMax)*200, label:v}));
+  const points = subs.map(x=>{
+    const isExpert = expert && x.id===expert.id;
+    const desv = expert && !isExpert ? Math.abs(x.final-expert.final) : 0;
+    const cx = 40+(Math.min(x.final,calMax)/calMax)*340;
+    const cy = 220-(Math.min(desv,desvMax)/desvMax)*200;
+    const color = x.critical?'var(--error-500)':isExpert?'var(--brand-600)':'var(--info-500)';
+    return `<circle cx="${cx}" cy="${cy}" r="6" fill="${color}" fill-opacity="0.9" stroke="#fff" stroke-width="1"><title>${esc(x.nombre)} — ${x.final}%</title></circle>`;
+  }).join('');
+  return `<svg viewBox="0 0 400 260" style="width:100%; height:240px;">
+    ${gridLines.map(g=>`<line x1="40" y1="${g.y}" x2="380" y2="${g.y}" stroke="var(--neutral-100)" stroke-width="1"></line><text x="32" y="${g.y}" text-anchor="end" dominant-baseline="middle" font-size="9" fill="var(--neutral-400)">${g.label}</text>`).join('')}
+    <line x1="40" y1="220" x2="380" y2="220" stroke="var(--neutral-300)" stroke-width="1"></line>
+    <line x1="40" y1="20" x2="40" y2="220" stroke="var(--neutral-300)" stroke-width="1"></line>
+    ${points}
+  </svg>`;
+}
+
+function renderMatrix(subs, expert, activeVertical, verticalsPresent){
+  if (!activeVertical) return '';
+  const rubric = RUBRICS[activeVertical];
+  if (!rubric) return '';
+  const matrixExpert = expert && expert.vertical===activeVertical ? expert : null;
+  const participants = subs.filter(x=>x.vertical===activeVertical && !(matrixExpert && x.id===matrixExpert.id));
+  const items = rubric.groups.flatMap(g=>g.items.map(([code,label])=>({code,label})));
+
+  const cell = (bg,label,title) => `<div title="${esc(title)}" style="background:${bg}; border-radius:6px; display:flex; align-items:center; justify-content:center; height:32px; color:#fff; font-weight:700; font-size:13px;">${label}</div>`;
+
+  const rows = items.map(item=>{
+    const expSt = matrixExpert ? matrixExpert.itemScores[item.code] : null;
+    const expCell = matrixExpert ? cell(expSt==='cumple'?'var(--success-500)':expSt==='no_cumple'?'var(--error-500)':'var(--neutral-300)', expSt==='cumple'?'C':expSt==='no_cumple'?'X':'—', item.label+' · experto') : '';
+    const cells = participants.map(p=>{
+      const st = p.itemScores[item.code];
+      let bg,label;
+      if (matrixExpert){ if(!st){bg='var(--neutral-300)';label='—';} else if(st===expSt){bg='var(--success-500)';label='✓';} else {bg='var(--error-500)';label='✕';} }
+      else { bg = st==='cumple'?'var(--success-500)':st==='no_cumple'?'var(--error-500)':'var(--neutral-300)'; label = st==='cumple'?'C':st==='no_cumple'?'X':'—'; }
+      return cell(bg,label,item.label+' · '+p.nombre);
+    }).join('');
+    return `<div style="display:flex; align-items:center; color:var(--neutral-700); padding-right:6px; font-size:11.5px;">${esc(item.label)}</div>${expCell || '<div></div>'}${cells}`;
+  }).join('');
+
+  return `<div class="card" style="margin-bottom:24px;">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:14px;">
+      <div><div style="font-size:15px; font-weight:700;">Comparación por atributo</div>
+      <div style="font-size:12px; color:var(--neutral-500);">${matrixExpert?('Verde = calibrado con '+esc(matrixExpert.nombre)+' · Rojo = descalibrado'):'Marca un ★ en la tabla para comparar'} · vertical ${esc(activeVertical)}</div></div>
+      <select class="inp" style="width:auto;" data-bind="matrixVertical">${verticalsPresent.map(v=>`<option value="${v}" ${activeVertical===v?'selected':''}>${v}</option>`).join('')}</select>
+    </div>
+    <div style="overflow-x:auto;">
+      <div style="display:grid; grid-template-columns:220px repeat(${participants.length+1}, 90px); gap:4px; font-size:10.5px; min-width:max-content;">
+        <div></div><div style="text-align:center; font-weight:700; color:var(--brand-700);">${matrixExpert?esc(matrixExpert.nombre)+' (experto)':''}</div>
+        ${participants.map(p=>`<div style="text-align:center; color:var(--neutral-600); font-weight:600; writing-mode:vertical-rl; transform:rotate(180deg); height:70px; display:flex; align-items:center; justify-content:center;">${esc(p.nombre)}</div>`).join('')}
+        ${rows}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderTable(subs, expert){
+  const filtered = subs
+    .filter(r=>!state.cargoFilter || r.cargo===state.cargoFilter)
+    .filter(r=>!state.filterFecha || r.fecha===state.filterFecha)
+    .filter(r=>!state.filterTicket || r.ticketId.toLowerCase().includes(state.filterTicket.toLowerCase()));
+
+  const rowsHtml = filtered.map(x=>{
+    const isExpert = expert && x.id===expert.id;
+    const desv = expert && !isExpert ? Math.abs(x.final-expert.final) : null;
+    const expanded = state.expandedId===x.id;
+    const items = (RUBRICS[x.vertical] ? RUBRICS[x.vertical].groups.flatMap(g=>g.items.map(([code,label])=>({code,label}))) : []);
+    return `<tr style="cursor:pointer;" data-action="toggleExpand" data-arg="${x.id}">
+        <td style="font-weight:600; color:var(--neutral-900);">
+          <span style="color:var(--neutral-400); font-size:11px; margin-right:6px;">${expanded?'▾':'▸'}</span>
+          <button data-action="toggleExpert" data-arg="${x.id}" title="Marcar como experto" style="background:none; border:none; cursor:pointer; font-size:15px; color:${isExpert?'var(--brand-600)':'var(--neutral-300)'};" onclick="event.stopPropagation()">★</button>
+          ${esc(x.nombre)} ${isExpert?'<span style="background:var(--brand-500); color:var(--neutral-1000); font-size:10px; font-weight:700; padding:2px 8px; border-radius:999px; margin-left:4px;">Experto</span>':''}
+          ${x.critical?'<span style="background:var(--error-100); color:var(--error-700); border:1px solid var(--error-300); font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px; margin-left:4px;">Crítico</span>':''}
+        </td>
+        <td>${esc(x.cargo)}</td><td>${esc(x.vertical)}</td>
+        <td><span style="color:var(--brand-700); font-weight:600; text-decoration:underline;">${esc(x.ticketId)}</span></td>
+        <td>${x.comm}%</td><td>${x.proc}%</td>
+        <td style="font-weight:700; color:${x.critical?'var(--error-600)':finalColor(x.final)};">${x.final}%</td>
+        <td style="font-weight:700; color:${isExpert?'var(--brand-600)':desv===null?'var(--neutral-500)':desvColor(desv)};">${isExpert?'Referencia':desv===null?'—':desv+'%'}</td>
+      </tr>
+      <tr style="display:${expanded?'table-row':'none'};"><td colspan="8" style="background:var(--neutral-50); padding:4px 20px 22px;">
+        <div style="display:${x.critical?'block':'none'}; background:var(--error-100); border:1px solid var(--error-300); color:var(--error-700); border-radius:10px; padding:10px 12px; font-size:12.5px; font-weight:600; margin-bottom:10px;">Error crítico detectado — la nota final se anula a 0%.</div>
+        <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--neutral-500); margin-bottom:8px;">Ítems de la planilla</div>
+        ${items.map(it=>{
+          const st = x.itemScores[it.code];
+          const color = st==='cumple'?'var(--success-600)':st==='no_cumple'?'var(--error-600)':'var(--neutral-500)';
+          return `<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--neutral-200); font-size:12.5px;"><span><b>${it.code}</b> ${esc(it.label)}</span><span style="font-weight:700; color:${color};">${statusLabel(st)}</span></div>`;
+        }).join('')}
+      </td></tr>`;
+  }).join('');
+
+  return `<div class="card" style="padding:0; overflow:hidden;">
+    <div style="padding:18px 24px; border-bottom:1px solid var(--neutral-200); font-size:14px; font-weight:700;">Detalle por evaluación <span style="font-size:12px; font-weight:500; color:var(--neutral-500);">· clic en una fila para ver la planilla completa</span></div>
+    <div class="qc-no-print" style="display:flex; gap:10px; align-items:end; flex-wrap:wrap; padding:16px 24px 0;">
+      <div><span class="lbl">Filtrar por fecha</span><input type="date" class="inp" data-bind="filterFecha" value="${esc(state.filterFecha)}"></div>
+      <div><span class="lbl">Buscar ticket</span><input class="inp" data-bind="filterTicket" value="${esc(state.filterTicket)}" placeholder="#CAL-..." style="width:180px;"></div>
+      <button class="btn btn-ghost" data-action="clearFilters">Quitar filtros</button>
+    </div>
+    <div style="overflow-x:auto; padding-top:8px;">
+      <table>
+        <thead><tr><th>Participante</th><th>Cargo</th><th>Vertical</th><th>Ticket</th><th>Comunicación</th><th>Proceso</th><th>Nota final</th><th>Desv. vs. experto</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function renderSummary(subs, expert){
+  if (!state.summaryUnlocked){
+    return `<div class="card" style="margin-top:24px;">
+      <div style="font-size:15px; font-weight:700; margin-bottom:4px;">Resumen final de calibración</div>
+      <p style="font-size:13px; color:var(--neutral-600); margin:0 0 14px;">Ingresa la clave del analista experto para ver el resumen final.</p>
+      <div style="display:flex; gap:10px; max-width:320px;">
+        <input type="password" class="inp" id="summaryPwInput" placeholder="Clave de acceso" value="${esc(state.summaryPwInput)}">
+        <button class="btn btn-primary" data-action="checkSummaryPassword">Ingresar</button>
+      </div>
+      <div style="display:${state.summaryPwError?'block':'none'}; color:var(--error-600); font-size:12px; margin-top:8px;">Clave incorrecta.</div>
+    </div>`;
+  }
+  if (!expert){
+    return `<div class="card" style="margin-top:24px;"><div style="font-size:15px; font-weight:700; margin-bottom:8px;">Resumen final de calibración</div>
+    <p style="font-size:13px; color:var(--neutral-600);">Marca a un participante como analista experto (★) en la tabla de arriba para generar el resumen.</p></div>`;
+  }
+  const participants = subs.filter(x=>x.vertical===expert.vertical && x.id!==expert.id);
+  const avgDesv = participants.length ? Math.round(participants.reduce((a,p)=>a+Math.abs(p.final-expert.final),0)/participants.length) : 0;
+  const verdict = participants.length===0
+    ? `Solo se registró la evaluación del experto (${esc(expert.nombre)}). Se necesitan más evaluaciones del equipo para calibrar.`
+    : avgDesv<=5 ? `El equipo está bien calibrado. Desviación promedio frente a ${esc(expert.nombre)}: ${avgDesv}%.`
+    : avgDesv<=12 ? `Calibración moderada frente a ${esc(expert.nombre)}, desviación promedio ${avgDesv}%. Hay espacio de mejora.`
+    : `El equipo está descalibrado. Desviación promedio frente a ${esc(expert.nombre)}: ${avgDesv}%. Se requiere intervención.`;
+  const worst = participants.map(p=>({nombre:p.nombre, desv:Math.abs(p.final-expert.final)})).sort((a,b)=>b.desv-a.desv).slice(0,3).filter(w=>w.desv>0);
+
+  return `<div class="card" style="margin-top:24px;">
+    <div style="font-size:15px; font-weight:700; margin-bottom:8px;">Resumen final de calibración</div>
+    <div style="font-size:13.5px; color:var(--neutral-800); line-height:1.6; margin-bottom:14px;">${verdict}</div>
+    ${worst.length?`<div style="font-size:12px; font-weight:700; color:var(--neutral-600); text-transform:uppercase; margin-bottom:8px;">Participantes más desalineados</div>
+    ${worst.map(w=>`<div style="display:flex; justify-content:space-between; font-size:13px; padding:6px 0; border-bottom:1px solid var(--neutral-100);"><span>${esc(w.nombre)}</span><span style="font-weight:700; color:var(--error-600);">${w.desv}% de desviación</span></div>`).join('')}`:''}
+  </div>`;
+}
+
+/* =========================================================================
+   7) EXPORTACIONES
+   ========================================================================= */
+function exportCSV(){
+  const expert = state.expertId ? state.submissions.find(e=>e.id===state.expertId) : null;
+  const header = ['Participante','Cargo','Vertical','Ticket','Comunicacion','Proceso','Nota final','Desviacion'];
+  const rows = state.submissions.map(x=>{
+    const desv = expert && x.id!==expert.id ? Math.abs(x.final-expert.final) : '';
+    return [x.nombre,x.cargo,x.vertical,x.ticketId,x.comm,x.proc,x.final,desv];
+  });
+  const csv = [header,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='calibracion_resultados.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+function exportPNG(){
+  const el = document.getElementById('qc-capture');
+  if (!el || !window.html2canvas) return;
+  window.html2canvas(el, {backgroundColor:'#F4F4F3', scale:2}).then(canvas=>{
+    const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download='calibracion_resultados.png';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  });
+}
+function exportPDF(){ window.print(); }
+
+/* =========================================================================
+   8) EVENTOS
+   ========================================================================= */
+function doCheckPassword(){
+  if (state.pwInput === RESULTS_PASSWORD){ state.resultsUnlocked=true; state.pwError=false; state.pwInput=''; }
+  else state.pwError = true;
+  render();
+}
+function doCheckSummaryPassword(){
+  const val = document.getElementById('summaryPwInput') ? document.getElementById('summaryPwInput').value : state.summaryPwInput;
+  if (val === RESULTS_PASSWORD){ state.summaryUnlocked=true; state.summaryPwError=false; state.summaryPwInput=''; }
+  else state.summaryPwError = true;
+  render();
+}
+
+document.getElementById('app').addEventListener('click', e=>{
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const action = el.dataset.action, arg = el.dataset.arg;
+  switch(action){
+    case 'setStatus': { const [id,status]=arg.split('|'); state.evalStatuses[id]=status; break; }
+    case 'submitEval': {
+      const ef = state.evalForm; const rubric = RUBRICS[ef.vertical];
+      const missing = rubric ? rubric.groups.some(g=>g.items.some(([code])=>!state.evalStatuses[code])) : true;
+      const valid = !!(ef.nombre && ef.cargo && ef.oficina && ef.fecha && ef.chatId && ef.vertical && rubric && !missing);
+      if (!valid){ state.evalError = true; render(); return; }
+      state.evalError = false;
+      submitEvaluation();
+      return;
+    }
+    case 'checkPassword': doCheckPassword(); return;
+    case 'checkSummaryPassword': doCheckSummaryPassword(); return;
+    case 'toggleExpert': state.expertId = state.expertId===arg ? null : arg; break;
+    case 'toggleExpand': state.expandedId = state.expandedId===arg ? null : arg; break;
+    case 'setCargoFilter': state.cargoFilter = state.cargoFilter===arg ? null : arg; break;
+    case 'clearFilters': state.filterFecha=''; state.filterTicket=''; state.cargoFilter=null; break;
+    case 'exportCSV': exportCSV(); return;
+    case 'exportPNG': exportPNG(); return;
+    case 'exportPDF': exportPDF(); return;
+  }
+  render();
+});
+
+document.getElementById('app').addEventListener('change', e=>{
+  const el = e.target;
+  if (el.dataset.action==='toggleCriticalCb'){ state.evalCriticos[el.dataset.arg] = el.checked; render(); return; }
+  if (el.dataset.bind){
+    const path = el.dataset.bind.split('.');
+    if (path.length===2) state.evalForm[path[1]] = path[1]==='nombre' ? el.value.toUpperCase() : el.value;
+    else state[path[0]] = el.value;
+    render();
+  }
+});
+document.getElementById('app').addEventListener('input', e=>{
+  const el = e.target;
+  if (el.dataset.bind && el.tagName==='INPUT' && el.type!=='date'){
+    const path = el.dataset.bind.split('.');
+    if (path.length===2) state.evalForm[path[1]] = path[1]==='nombre' ? el.value.toUpperCase() : el.value;
+    else state[path[0]] = el.value;
+    render();
+  }
+});
+
+/* =========================================================================
+   9) RENDER PRINCIPAL
+   ========================================================================= */
+function render(){
+  document.getElementById('navEval').style.background = state.activeSection==='evaluacion' ? 'var(--brand-500)' : 'transparent';
+  document.getElementById('navRes').style.background = state.activeSection==='resultados' ? 'var(--brand-500)' : 'transparent';
+  const app = document.getElementById('app');
+  app.innerHTML = `<div id="evalContent" style="display:${state.activeSection==='evaluacion'?'block':'none'};"></div><div id="resContent" style="display:${state.activeSection==='resultados'?'block':'none'};"></div>`;
+  if (state.activeSection==='evaluacion') renderEvaluacion(); else renderResultados();
+}
+document.getElementById('app').parentElement; // noop
+document.querySelector('[data-action="goEvaluacion"]').addEventListener('click', ()=>{ state.activeSection='evaluacion'; render(); });
+document.querySelector('[data-action="goResultados"]').addEventListener('click', ()=>{ state.activeSection='resultados'; render(); });
+
+render();
+</script>
+</body>
+</html>
