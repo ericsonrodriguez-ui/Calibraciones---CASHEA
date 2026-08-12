@@ -634,6 +634,7 @@ document.getElementById('app').addEventListener('click', e=>{
     case 'exportCSV': exportCSV(); return;
     case 'exportPNG': exportPNG(); return;
     case 'exportPDF': exportPDF(); return;
+    case 'toggleCriticalCb': return; // el evento 'change' de abajo se encarga de esto
   }
   render();
 });
